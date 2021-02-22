@@ -37,6 +37,8 @@ static inline void z_data_copy(void)
 #endif
 FUNC_NORETURN void z_cstart(void);
 
+void z_device_state_init(void);
+
 extern FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry,
 			  void *p1, void *p2, void *p3);
 
@@ -199,6 +201,11 @@ void z_mem_manage_init(void);
 
 /* Workaround for build-time page table mapping of the kernel */
 void z_kernel_map_fixup(void);
+
+#define LOCKED(lck) for (k_spinlock_key_t __i = {},			\
+					  __key = k_spin_lock(lck);	\
+			!__i.key;					\
+			k_spin_unlock(lck, __key), __i.key = 1)
 
 #ifdef __cplusplus
 }
