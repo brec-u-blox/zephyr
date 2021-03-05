@@ -649,25 +649,22 @@ class DeviceHandler(Handler):
 
         log_out_fp.close()
 
-    def get_available_device(self, instance):
-        device = instance.platform.name
-        for d in self.suite.duts:
-            if d.platform == device and d.available and (d.serial or d.serial_pty):
-                d.available = 0
-                d.counter += 1
-                return d
-
-        return None
-
     def device_is_available(self, instance):
         device = instance.platform.name
         fixture = instance.testcase.harness_config.get("fixture")
         for d in self.suite.duts:
             if fixture and fixture not in d.fixtures:
                 continue
-            if d.platform == device and d.available and (d.serial or d.serial_pty):
+            if d.platform != device or not (d.serial or d.serial_pty):
+                continue
+            d.lock.acquire()
+            avail = False
+            if d.available:
                 d.available = 0
                 d.counter += 1
+                avail = True
+            d.lock.release()
+            if avail:
                 return d
 
         return None
@@ -857,6 +854,13 @@ class DeviceHandler(Handler):
             self.instance.reason = "Timeout"
 
         self.instance.results = harness.tests
+
+        # sometimes a test instance hasn't been executed successfully with an
+        # empty dictionary results, in order to include it into final report,
+        # so fill the results as BLOCK
+        if self.instance.results == {}:
+            for k in self.instance.testcase.cases:
+                self.instance.results[k] = 'BLOCK'
 
         if harness.state:
             self.set_state(harness.state, handler_time)
@@ -1986,8 +1990,10 @@ class CMake():
             ldflags = "-Wl,--fatal-warnings"
             cflags = "-Werror"
             aflags = "-Wa,--fatal-warnings"
+            gen_defines_args = "--err-on-deprecated-properties"
         else:
             ldflags = cflags = aflags = ""
+            gen_defines_args = ""
 
         logger.debug("Running cmake on %s for %s" % (self.source_dir, self.platform.name))
         cmake_args = [
@@ -1996,6 +2002,7 @@ class CMake():
             f'-DEXTRA_CFLAGS="{cflags}"',
             f'-DEXTRA_AFLAGS="{aflags}',
             f'-DEXTRA_LDFLAGS="{ldflags}"',
+            f'-DEXTRA_GEN_DEFINES_ARGS={gen_defines_args}',
             f'-G{self.generator}'
         ]
 
@@ -3473,7 +3480,7 @@ class TestSuite(DisablePyTestCollectionMixin):
                         classname = p + ":" + ".".join(instance.testcase.name.split(".")[:2])
 
                     # remove testcases that are being re-run from exiting reports
-                    for tc in eleTestsuite.findall(f'testcase/[@classname="{classname}"]'):
+                    for tc in eleTestsuite.findall(f'testcase/[@classname="{classname}"][@name="{instance.testcase.name}"]'):
                         eleTestsuite.remove(tc)
 
                     eleTestcase = ET.SubElement(eleTestsuite, 'testcase',
@@ -3835,7 +3842,7 @@ class DUT(object):
         self.pre_script = pre_script
         self.probe_id = None
         self.notes = None
-
+        self.lock = Lock()
         self.match = False
 
 

@@ -157,6 +157,21 @@ typedef int16_t device_handle_t;
 			data_ptr, cfg_ptr, level, prio, api_ptr)
 
 /**
+ * @def DEVICE_DT_NAME
+ *
+ * @brief Return a string name for a devicetree node.
+ *
+ * @details This macro returns a string literal usable as a device name
+ * from a devicetree node. If the node has a "label" property, its value is
+ * returned. Otherwise, the node's full "node-name@@unit-address" name is
+ * returned.
+ *
+ * @param node_id The devicetree node identifier.
+ */
+#define DEVICE_DT_NAME(node_id) \
+	DT_PROP_OR(node_id, label, DT_NODE_FULL_NAME(node_id))
+
+/**
  * @def DEVICE_DT_DEFINE
  *
  * @brief Like DEVICE_DEFINE but taking metadata from a devicetree node.
@@ -197,7 +212,7 @@ typedef int16_t device_handle_t;
 			 data_ptr, cfg_ptr, level, prio,		\
 			 api_ptr, ...)					\
 	Z_DEVICE_DEFINE(node_id, Z_DEVICE_DT_DEV_NAME(node_id),		\
-			DT_PROP_OR(node_id, label, ""), init_fn,	\
+			DEVICE_DT_NAME(node_id), init_fn,		\
 			pm_control_fn,					\
 			data_ptr, cfg_ptr, level, prio,			\
 			api_ptr, __VA_ARGS__)
@@ -255,6 +270,29 @@ typedef int16_t device_handle_t;
  * @param inst instance number
  */
 #define DEVICE_DT_INST_GET(inst) DEVICE_DT_GET(DT_DRV_INST(inst))
+
+/**
+ * @def DEVICE_DT_GET_ANY
+ *
+ * @brief Obtain a pointer to a device object by devicetree compatible
+ *
+ * If any enabled devicetree node has the given compatible and a
+ * device object was created from it, this returns that device.
+ *
+ * If there no such devices, this returns NULL.
+ *
+ * If there are multiple, this returns an arbitrary one.
+ *
+ * If this returns non-NULL, the device must be checked for readiness
+ * before use, e.g. with device_is_ready().
+ *
+ * @param compat lowercase-and-underscores devicetree compatible
+ * @return a pointer to a device, or NULL
+ */
+#define DEVICE_DT_GET_ANY(compat)			\
+	COND_CODE_1(DT_HAS_COMPAT_STATUS_OKAY(compat),	\
+		    (DEVICE_DT_GET(DT_INST(0, compat))),	\
+		    (NULL))
 
 /**
  * @def DEVICE_GET
@@ -973,7 +1011,7 @@ BUILD_ASSERT(sizeof(device_handle_t) == 2, "fix the linker scripts");
 		Z_DEVICE_DEFINE_INIT(node_id, dev_name, pm_control_fn)	\
 	};								\
 	BUILD_ASSERT(sizeof(Z_STRINGIFY(drv_name)) <= Z_DEVICE_MAX_NAME_LEN, \
-		     Z_STRINGIFY(DEVICE_GET_NAME(drv_name)) " too long"); \
+		     Z_STRINGIFY(DEVICE_NAME_GET(drv_name)) " too long"); \
 	Z_INIT_ENTRY_DEFINE(DEVICE_NAME_GET(dev_name), init_fn,		\
 		(&DEVICE_NAME_GET(dev_name)), level, prio)
 

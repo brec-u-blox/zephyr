@@ -20,11 +20,10 @@
 #include "ticker/ticker.h"
 
 #include "pdu.h"
-#include "ll.h"
 
 #include "lll.h"
-#include "lll_vendor.h"
 #include "lll_clock.h"
+#include "lll/lll_vendor.h"
 #include "lll_scan.h"
 #include "lll_sync.h"
 #include "lll_sync_iso.h"
@@ -35,6 +34,8 @@
 #include "ull_internal.h"
 #include "ull_scan_internal.h"
 #include "ull_sync_internal.h"
+
+#include "ll.h"
 
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BT_DEBUG_HCI_DRIVER)
 #define LOG_MODULE_NAME bt_ctlr_ull_sync
@@ -418,6 +419,8 @@ void ull_sync_setup(struct ll_scan_set *scan, struct ll_scan_aux_set *aux,
 
 	sync_offset_us = ftr->radio_end_us;
 	sync_offset_us += (uint32_t)si->offs * lll->window_size_event_us;
+	/* offs_adjust may be 1 only if sync setup by LL_PERIODIC_SYNC_IND */
+	sync_offset_us += (si->offs_adjust ? OFFS_ADJUST_US : 0U);
 	sync_offset_us -= PKT_AC_US(pdu->len, 0, lll->phy);
 	sync_offset_us -= EVENT_OVERHEAD_START_US;
 	sync_offset_us -= EVENT_JITTER_US;
