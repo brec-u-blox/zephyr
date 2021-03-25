@@ -237,8 +237,7 @@ int z_impl_k_thread_name_set(struct k_thread *thread, const char *value)
 static inline int z_vrfy_k_thread_name_set(struct k_thread *t, const char *str)
 {
 #ifdef CONFIG_THREAD_NAME
-	size_t len;
-	int err;
+	char name[CONFIG_THREAD_MAX_NAME_LEN];
 
 	if (t != NULL) {
 		if (Z_SYSCALL_OBJ(t, K_OBJ_THREAD) != 0) {
@@ -246,15 +245,15 @@ static inline int z_vrfy_k_thread_name_set(struct k_thread *t, const char *str)
 		}
 	}
 
-	len = z_user_string_nlen(str, CONFIG_THREAD_MAX_NAME_LEN, &err);
-	if (err != 0) {
-		return -EFAULT;
-	}
-	if (Z_SYSCALL_MEMORY_READ(str, len) != 0) {
+	/* In theory we could copy directly into thread->name, but
+	 * the current z_vrfy / z_impl split does not provide a
+	 * means of doing so.
+	 */
+	if (z_user_string_copy(name, (char *)str, sizeof(name)) != 0) {
 		return -EFAULT;
 	}
 
-	return z_impl_k_thread_name_set(t, str);
+	return z_impl_k_thread_name_set(t, name);
 #else
 	return -ENOSYS;
 #endif /* CONFIG_THREAD_NAME */
@@ -881,7 +880,16 @@ int z_impl_k_float_disable(struct k_thread *thread)
 #if defined(CONFIG_FPU) && defined(CONFIG_FPU_SHARING)
 	return arch_float_disable(thread);
 #else
-	return -ENOSYS;
+	return -ENOTSUP;
+#endif /* CONFIG_FPU && CONFIG_FPU_SHARING */
+}
+
+int z_impl_k_float_enable(struct k_thread *thread, unsigned int options)
+{
+#if defined(CONFIG_FPU) && defined(CONFIG_FPU_SHARING)
+	return arch_float_enable(thread, options);
+#else
+	return -ENOTSUP;
 #endif /* CONFIG_FPU && CONFIG_FPU_SHARING */
 }
 
