@@ -1252,6 +1252,34 @@ static void test_arrays(void)
 	zassert_equal(DT_PROP_LEN(TEST_ARRAYS, c), 2, "");
 }
 
+static void test_foreach_prop_elem(void)
+{
+#define TIMES_TWO(node_id, prop, idx) \
+	(2 * DT_PROP_BY_IDX(node_id, prop, idx)),
+
+	int array[] = {
+		DT_FOREACH_PROP_ELEM(TEST_ARRAYS, a, TIMES_TWO)
+	};
+
+	zassert_equal(ARRAY_SIZE(array), 3, "");
+	zassert_equal(array[0], 2000, "");
+	zassert_equal(array[1], 4000, "");
+	zassert_equal(array[2], 6000, "");
+
+#undef DT_DRV_COMPAT
+#define DT_DRV_COMPAT vnd_array_holder
+
+	int inst_array[] = {
+		DT_INST_FOREACH_PROP_ELEM(0, a, TIMES_TWO)
+	};
+
+	zassert_equal(ARRAY_SIZE(inst_array), ARRAY_SIZE(array), "");
+	zassert_equal(inst_array[0], array[0], "");
+	zassert_equal(inst_array[1], array[1], "");
+	zassert_equal(inst_array[2], array[2], "");
+#undef TIMES_TWO
+}
+
 struct test_gpio_info {
 	uint32_t reg_addr;
 	uint32_t reg_len;
@@ -1561,6 +1589,25 @@ static void test_great_grandchild(void)
 	zassert_equal(DT_PROP(DT_NODELABEL(test_ggc), ggc_prop), 42, "");
 }
 
+static void test_compat_get_any_status_okay(void)
+{
+	zassert_true(
+		DT_SAME_NODE(
+			DT_COMPAT_GET_ANY_STATUS_OKAY(vnd_reg_holder),
+			TEST_REG),
+		"");
+
+	/*
+	 * DT_SAME_NODE requires that both its arguments are valid
+	 * node identifiers, so we can't pass it DT_INVALID_NODE,
+	 * which is what this DT_COMPAT_GET_ANY_STATUS_OKAY() expands to.
+	 */
+	zassert_false(
+		DT_NODE_EXISTS(
+			DT_COMPAT_GET_ANY_STATUS_OKAY(this_is_not_a_real_compat)),
+		"");
+}
+
 static bool ord_in_array(unsigned int ord, unsigned int *array,
 			 size_t array_size)
 {
@@ -1763,6 +1810,7 @@ void test_main(void)
 			 ztest_unit_test(test_pwms),
 			 ztest_unit_test(test_macro_names),
 			 ztest_unit_test(test_arrays),
+			 ztest_unit_test(test_foreach_prop_elem),
 			 ztest_unit_test(test_devices),
 			 ztest_unit_test(test_cs_gpios),
 			 ztest_unit_test(test_chosen),
@@ -1772,6 +1820,7 @@ void test_main(void)
 			 ztest_unit_test(test_parent),
 			 ztest_unit_test(test_child_nodes_list),
 			 ztest_unit_test(test_great_grandchild),
+			 ztest_unit_test(test_compat_get_any_status_okay),
 			 ztest_unit_test(test_dep_ord),
 			 ztest_unit_test(test_path),
 			 ztest_unit_test(test_node_name),

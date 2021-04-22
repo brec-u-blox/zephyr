@@ -29,8 +29,18 @@ interface and listing all issues with the `bug label
 API Changes
 ***********
 
+* Driver APIs now return ``-ENOSYS`` if optional functions are not implemented.
+  If the feature is not supported by the hardware ``-ENOTSUP`` will be returned.
+  Formerly ``-ENOTSUP`` was returned for both failure modes, meaning this change
+  may require existing code that tests only for that value to be changed.
+
 * The :c:func:`wait_for_usb_dfu` function now accepts a ``k_timeout_t`` argument instead of
   using the ``CONFIG_USB_DFU_WAIT_DELAY_MS`` macro.
+
+* Added disconnect reason to the :c:func:`disconnected` callback of :c:struct:`bt_iso_chan_ops`.
+
+* Align error handling of :c:func:bt_l2cap_chan_send and
+  :c:func:bt_iso_chan_send so when an error occur the buffer is not unref.
 
 Deprecated in this release
 
@@ -79,6 +89,8 @@ Deprecated in this release
   ``CONFIG_DISK_ACCESS_SDHC`` -> `CONFIG_DISK_DRIVER_SDMMC`.
   Disk API header ``<include/disk/disk_access.h>`` is deprecated in favor of
   ``<include/storage/disk_access.h>``.
+
+* :c:func:`flash_write_protection_set()`.
 
 ==========================
 
@@ -156,6 +168,10 @@ Drivers and Sensors
 
 * Bluetooth
 
+  * The Kconfig option ``CONFIG_BT_CTLR_TO_HOST_UART_DEV_NAME`` was removed.
+    Use the :ref:`zephyr,bt-c2h-uart chosen node <devicetree-chosen-nodes>`
+    directly instead.
+
 * CAN
 
 * Clock Control
@@ -183,6 +199,18 @@ Drivers and Sensors
 * Ethernet
 
 * Flash
+
+  * flash_write_protection_set() has been deprecated and will be removed in
+    Zephyr 2.8. Responsibility for write/erase protection management has been
+    moved to the driver-specific implementation of the flash_write() and
+    flash_erase() API calls. All in-tree flash drivers have been updated,
+    and the protect implementation removed from their API tables.
+    During the deprecation period user code invoking
+    flash_write_protection_set() will have no effect, but the flash_write() and
+    flash_erase() driver shims will wrap their calls with calls to the protect
+    implementation if it is present in the API table.
+    Out-of-tree drivers must be updated before the wrapping in the shims is
+    removed when the deprecation period ends.
 
 * GPIO
 
@@ -253,6 +281,8 @@ Build and Infrastructure
 
 * Devicetree
 
+  - :c:macro:`DT_COMPAT_GET_ANY_STATUS_OKAY`: new macro
+
 Libraries / Subsystems
 **********************
 
@@ -282,6 +312,11 @@ Libraries / Subsystems
 
 * Tracing
 
+  * ``CONFIG_TRACING_CPU_STATS`` was removed in favor of
+    ``CONFIG_THREAD_RUNTIME_STATS`` which provides per thread statistics. The
+    same functionality is also available when Thread analyzer is enabled with
+    the runtime statistics enabled.
+
 * Debug
 
 HALs
@@ -289,6 +324,15 @@ HALs
 
 * HALs are now moved out of the main tree as external modules and reside in
   their own standalone repositories.
+
+
+Trusted Firmware-m
+******************
+
+* Configured QEMU to run Zephyr samples and tests in CI on mps2_an521_nonsecure
+  (Cortex-M33 Non-Secure) with TF-M as the secure firmware component.
+* Synchronized Trusted-Firmware-M module to the upstream v1.3.0 release.
+
 
 Documentation
 *************

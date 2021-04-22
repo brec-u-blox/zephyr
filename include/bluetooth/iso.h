@@ -238,9 +238,10 @@ struct bt_iso_chan_ops {
 	 *  channel is disconnected, including when a connection gets
 	 *  rejected.
 	 *
-	 *  @param chan The channel that has been Disconnected
+	 *  @param chan   The channel that has been Disconnected
+	 *  @param reason HCI reason for the disconnection.
 	 */
-	void (*disconnected)(struct bt_iso_chan *chan);
+	void (*disconnected)(struct bt_iso_chan *chan, uint8_t reason);
 
 	/** @brief Channel alloc_buf callback
 	 *
@@ -354,6 +355,9 @@ int bt_iso_chan_disconnect(struct bt_iso_chan *chan);
  *  be queued and sent as and when credits are received from peer.
  *  Regarding to first input parameter, to get details see reference description
  *  to bt_iso_chan_connect() API above.
+ *
+ *  @note Buffer ownership is transferred to the stack in case of success, in
+ *  case of an error the caller retains the ownership of the buffer.
  *
  *  @param chan Channel object.
  *  @param buf Buffer containing data to be sent.

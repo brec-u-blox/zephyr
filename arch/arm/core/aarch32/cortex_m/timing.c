@@ -26,7 +26,8 @@
  */
 static inline uint64_t z_arm_dwt_freq_get(void)
 {
-#if defined(CONFIG_SOC_FAMILY_NRF)
+#if defined(CONFIG_SOC_FAMILY_NRF) || \
+	defined(CONFIG_SOC_SERIES_IMX_RT6XX)
 	/*
 	 * DWT frequency is taken directly from the
 	 * System Core clock (CPU) frequency, if the
@@ -117,5 +118,5 @@ uint64_t arch_timing_cycles_to_ns_avg(uint64_t cycles, uint32_t count)
 
 uint32_t arch_timing_freq_get_mhz(void)
 {
-	return (uint32_t)(arch_timing_freq_get() / 1000000);
+	return (uint32_t)(arch_timing_freq_get() / 1000000U);
 }

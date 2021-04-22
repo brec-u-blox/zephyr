@@ -78,6 +78,12 @@ static inline bool is_condition_met(struct k_poll_event *event, uint32_t *state)
 			return true;
 		}
 		break;
+	case K_POLL_TYPE_MSGQ_DATA_AVAILABLE:
+		if (event->msgq->used_msgs > 0) {
+			*state = K_POLL_STATE_MSGQ_DATA_AVAILABLE;
+			return true;
+		}
+		break;
 	case K_POLL_TYPE_IGNORE:
 		break;
 	default:
@@ -134,6 +140,10 @@ static inline void register_event(struct k_poll_event *event,
 		__ASSERT(event->signal != NULL, "invalid poll signal\n");
 		add_event(&event->signal->poll_events, event, poller);
 		break;
+	case K_POLL_TYPE_MSGQ_DATA_AVAILABLE:
+		__ASSERT(event->msgq != NULL, "invalid message queue\n");
+		add_event(&event->msgq->poll_events, event, poller);
+		break;
 	case K_POLL_TYPE_IGNORE:
 		/* nothing to do */
 		break;
@@ -163,6 +173,10 @@ static inline void clear_event_registration(struct k_poll_event *event)
 		break;
 	case K_POLL_TYPE_SIGNAL:
 		__ASSERT(event->signal != NULL, "invalid poll signal\n");
+		remove_event = true;
+		break;
+	case K_POLL_TYPE_MSGQ_DATA_AVAILABLE:
+		__ASSERT(event->msgq != NULL, "invalid message queue\n");
 		remove_event = true;
 		break;
 	case K_POLL_TYPE_IGNORE:
@@ -316,7 +330,7 @@ static inline int z_vrfy_k_poll(struct k_poll_event *events,
 	/* Validate the events buffer and make a copy of it in an
 	 * allocated kernel-side buffer.
 	 */
-	if (Z_SYSCALL_VERIFY(num_events >= 0)) {
+	if (Z_SYSCALL_VERIFY(num_events >= 0U)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -362,6 +376,9 @@ static inline int z_vrfy_k_poll(struct k_poll_event *events,
 		case K_POLL_TYPE_DATA_AVAILABLE:
 			Z_OOPS(Z_SYSCALL_OBJ(e->queue, K_OBJ_QUEUE));
 			break;
+		case K_POLL_TYPE_MSGQ_DATA_AVAILABLE:
+			Z_OOPS(Z_SYSCALL_OBJ(e->msgq, K_OBJ_MSGQ));
+			break;
 		default:
 			ret = -EINVAL;
 			goto out_free;
@@ -387,7 +404,7 @@ static int signal_poll_event(struct k_poll_event *event, uint32_t state)
 	struct z_poller *poller = event->poller;
 	int retcode = 0;
 
-	if (poller) {
+	if (poller != NULL) {
 		if (poller->mode == MODE_POLL) {
 			retcode = signal_poller(event, state);
 		} else if (poller->mode == MODE_TRIGGERED) {
