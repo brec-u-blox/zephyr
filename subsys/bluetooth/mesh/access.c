@@ -215,7 +215,7 @@ static int pub_period_start(struct bt_mesh_model_pub *pub)
 		BT_DBG("Update failed, skipping publish (err: %d)", err);
 		pub->count = 0;
 		pub->period_start = k_uptime_get_32();
-		publish_sent(err, pub);
+		publish_sent(err, pub->mod);
 		return err;
 	}
 
@@ -330,7 +330,7 @@ int bt_mesh_comp_register(const struct bt_mesh_comp *comp)
 	int err;
 
 	/* There must be at least one element */
-	if (!comp->elem_count) {
+	if (!comp || !comp->elem_count) {
 		return -EINVAL;
 	}
 

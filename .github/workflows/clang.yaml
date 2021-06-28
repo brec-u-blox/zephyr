@@ -14,15 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     needs: clang-build-cancel
     container:
-      image: zephyrprojectrtos/ci:v0.17.0-rc1
+      image: zephyrprojectrtos/ci:v0.17.1
       options: '--entrypoint /bin/bash'
     strategy:
       fail-fast: false
       matrix:
-        subset: [1, 2, 3, 4, 5, 6, 7 , 8, 9, 10]
+        subset: [1, 2, 3, 4, 5]
     env:
       ZEPHYR_SDK_INSTALL_DIR: /opt/toolchains/zephyr-sdk-0.12.4
       CLANG_ROOT_DIR: /usr/lib/llvm-12
+      MATRIX_SIZE: 5
     steps:
       - name: Cancel Previous Runs
         uses: styfle/cancel-workflow-action@0.6.0
@@ -55,7 +56,7 @@ jobs:
           #source zephyr-env.sh
           export ZEPHYR_BASE=${PWD}
           export ZEPHYR_TOOLCHAIN_VARIANT=llvm
-          ./scripts/twister --inline-logs -N -v --integration -p native_posix --subset ${{matrix.subset}}/10 --retry-failed 3
+          ./scripts/twister --inline-logs -M -N -v -p native_posix --subset ${{matrix.subset}}/${MATRIX_SIZE} --retry-failed 3
 
       - name: Upload Unit Test Results
         if: always()
@@ -81,8 +82,9 @@ jobs:
         run: ls -R
 
       - name: Publish Unit Test Results
-        uses: EnricoMi/publish-unit-test-result-action@v1.6
+        uses: EnricoMi/publish-unit-test-result-action@v1.12
         with:
           check_name: Unit Test Results
           github_token: ${{ secrets.GITHUB_TOKEN }}
           files: "**/twister.xml"
+          comment_on_pr: false

@@ -57,6 +57,9 @@ struct bt_conn;
 /* Don't require everyone to include iso.h */
 struct bt_iso_biginfo;
 
+/* Don't require everyone to include direction.h */
+struct bt_df_per_adv_sync_iq_samples_report;
+
 struct bt_le_ext_adv_sent_info {
 	/** The number of advertising events completed. */
 	uint8_t num_sent;
@@ -127,6 +130,11 @@ typedef void (*bt_ready_cb_t)(int err);
  * Enable Bluetooth. Must be the called before any calls that
  * require communication with the local Bluetooth hardware.
  *
+ * When @option{CONFIG_BT_SETTINGS} has been enabled and the application is not
+ * managing identities of the stack itself then the application must call
+ * @ref settings_load() before the stack is fully enabled.
+ * See @ref bt_id_create() for more information.
+ *
  * @param cb Callback to notify completion or NULL to perform the
  * enabling synchronously.
  *
@@ -157,24 +165,6 @@ int bt_set_name(const char *name);
  * @return Bluetooth Device Name
  */
 const char *bt_get_name(void);
-
-/**
- * @brief Set the local Identity Address
- *
- * Allows setting the local Identity Address from the application.
- * This API must be called before calling bt_enable(). Calling it at any
- * other time will cause it to fail. In most cases the application doesn't
- * need to use this API, however there are a few valid cases where
- * it can be useful (such as for testing).
- *
- * At the moment, the given address must be a static random address. In the
- * future support for public addresses may be added.
- *
- * @deprecated in 2.5 release, replace with bt_id_create before bt_enable.
- *
- * @return Zero on success or (negative) error code otherwise.
- */
-__deprecated int bt_set_id_addr(const bt_addr_le_t *addr);
 
 /**
  * @brief Get the currently configured identities.
@@ -537,9 +527,6 @@ struct bt_le_adv_param {
 	 *       enabled or not supported by the controller it is not possible
 	 *       to scan and advertise simultaneously using two different
 	 *       random addresses.
-	 *
-	 * @note It is not possible to have multiple connectable advertising
-	 *       sets advertising simultaneously using different identities.
 	 */
 	uint8_t  id;
 
@@ -614,10 +601,20 @@ enum {
 };
 
 struct bt_le_per_adv_param {
-	/** Minimum Periodic Advertising Interval (N * 1.25 ms) */
+	/**
+	 * @brief Minimum Periodic Advertising Interval (N * 1.25 ms)
+	 *
+	 * Shall be greater or equal to BT_GAP_PER_ADV_MIN_INTERVAL and
+	 * less or equal to interval_max.
+	 */
 	uint16_t interval_min;
 
-	/** Maximum Periodic Advertising Interval (N * 1.25 ms) */
+	/**
+	 * @brief Maximum Periodic Advertising Interval (N * 1.25 ms)
+	 *
+	 * Shall be less or equal to BT_GAP_PER_ADV_MAX_INTERVAL and
+	 * greater or equal to interval_min.
+	 */
 	uint16_t interval_max;
 
 	/** Bit-field of periodic advertising options */
@@ -698,6 +695,14 @@ struct bt_le_per_adv_param {
 						 BT_GAP_ADV_FAST_INT_MIN_2, \
 						 BT_GAP_ADV_FAST_INT_MAX_2, \
 						 NULL)
+
+/** Connectable extended advertising with @ref BT_LE_ADV_OPT_USE_NAME */
+#define BT_LE_EXT_ADV_CONN_NAME BT_LE_ADV_PARAM(BT_LE_ADV_OPT_EXT_ADV | \
+						BT_LE_ADV_OPT_CONNECTABLE | \
+						BT_LE_ADV_OPT_USE_NAME, \
+						BT_GAP_ADV_FAST_INT_MIN_2, \
+						BT_GAP_ADV_FAST_INT_MAX_2, \
+						NULL)
 
 /** Non-connectable extended advertising with private address */
 #define BT_LE_EXT_ADV_NCONN BT_LE_ADV_PARAM(BT_LE_ADV_OPT_EXT_ADV, \
@@ -1150,7 +1155,7 @@ struct bt_le_per_adv_sync_recv_info {
 	/** The RSSI of the advertisement excluding any CTE. */
 	int8_t rssi;
 
-	/** The Constant Tone Extension (CTE) of the advertisement */
+	/** The Constant Tone Extension (CTE) of the advertisement (@ref bt_df_cte_type) */
 	uint8_t cte_type;
 };
 
@@ -1224,6 +1229,16 @@ struct bt_le_per_adv_sync_cb {
 	 * @param biginfo  The BIGInfo report.
 	 */
 	void (*biginfo)(struct bt_le_per_adv_sync *sync, const struct bt_iso_biginfo *biginfo);
+
+	/**
+	 * @brief Callback for IQ samples report collected when sampling
+	 *        CTE received with periodic advertising PDU.
+	 *
+	 * @param sync The periodic advertising sync object.
+	 * @param info Information about the sync event.
+	 */
+	void (*cte_report_cb)(struct bt_le_per_adv_sync *sync,
+			      struct bt_df_per_adv_sync_iq_samples_report const *info);
 
 	sys_snode_t node;
 };

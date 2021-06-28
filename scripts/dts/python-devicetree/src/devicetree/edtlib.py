@@ -2,7 +2,7 @@
 # Copyright (c) 2019 Linaro Limited
 # SPDX-License-Identifier: BSD-3-Clause
 
-# Tip: You can view just the documentation with 'pydoc3 edtlib'
+# Tip: You can view just the documentation with 'pydoc3 devicetree.edtlib'
 
 """
 Library for working with devicetrees at a higher level compared to dtlib. Like
@@ -25,7 +25,7 @@ See their constructor docstrings for details. There is also a
 bindings_from_paths() helper function.
 """
 
-# NOTE: testedtlib.py is the test suite for this library.
+# NOTE: tests/test_edtlib.py is the test suite for this library.
 
 # Implementation notes
 # --------------------
@@ -79,7 +79,7 @@ try:
     # This makes e.g. gen_defines.py more than twice as fast.
     from yaml import CLoader as Loader
 except ImportError:
-    from yaml import Loader
+    from yaml import Loader     # type: ignore
 
 from devicetree.dtlib import DT, DTError, to_num, to_nums, Type
 from devicetree.grutils import Graph
@@ -334,7 +334,7 @@ class EDT:
                 # representing the file)
                 raw = yaml.load(contents, Loader=_BindingLoader)
             except yaml.YAMLError as e:
-                _LOG.warning(
+                _err(
                         f"'{binding_path}' appears in binding directories "
                         f"but isn't valid YAML: {e}")
                 continue
@@ -474,6 +474,30 @@ class EDT:
                         f"'{spec.name}' that is only tokenizable "
                         'in lowercase: ' +
                         ', '.join(repr(x) for x in spec.enum))
+
+        # Validate the contents of compatible properties.
+        # The regular expression comes from dt-schema.
+        compat_re = r'^[a-zA-Z][a-zA-Z0-9,+\-._]+$'
+        for node in self.nodes:
+            if 'compatible' not in node.props:
+                continue
+
+            compatibles = node.props['compatible'].val
+
+            # _check() runs after _init_compat2binding() has called
+            # _dt_compats(), which already converted every compatible
+            # property to a list of strings. So we know 'compatibles'
+            # is a list, but add an assert for future-proofing.
+            assert isinstance(compatibles, list)
+
+            for compat in compatibles:
+                # This is also just for future-proofing.
+                assert isinstance(compat, str)
+
+                if not re.match(compat_re, compat):
+                    _err(f"node '{node.path}' compatible '{compat}' "
+                         'must match this regular expression: '
+                         f"'{compat_re}'")
 
 class Node:
     """

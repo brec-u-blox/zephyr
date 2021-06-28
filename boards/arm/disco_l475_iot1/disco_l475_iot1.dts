@@ -50,6 +50,28 @@
 	};
 };
 
+&clk_hsi {
+	status = "okay";
+};
+
+&pll {
+	div-m = <1>;
+	mul-n = <20>;
+	div-p = <7>;
+	div-q = <2>;
+	div-r = <4>;
+	clocks = <&clk_hsi>;
+	status = "okay";
+};
+
+&rcc {
+	clocks = <&pll>;
+	clock-frequency = <DT_FREQ_M(80)>;
+	ahb-prescaler = <1>;
+	apb1-prescaler = <1>;
+	apb2-prescaler = <1>;
+};
+
 &usart1 {
 	current-speed = <115200>;
 	pinctrl-0 = <&usart1_tx_pb6 &usart1_rx_pb7>;
@@ -155,7 +177,6 @@
 };
 
 &flash0 {
-
 	partitions {
 		compatible = "fixed-partitions";
 		#address-cells = <1>;
@@ -251,12 +272,12 @@
 
 			slot1_partition: partition@0 {
 				label = "image-1";
-				reg = <0x00000000 0x000D8000>;
+				reg = <0x00000000 0x000d8000>;
 				};
 
-			storage_partition: partition@D8000 {
+			storage_partition: partition@d8000 {
 				label = "storage";
-				reg = <0x000D8000 DT_SIZE_M(7)>;
+				reg = <0x000d8000 DT_SIZE_M(7)>;
 			};
 		};
 	};

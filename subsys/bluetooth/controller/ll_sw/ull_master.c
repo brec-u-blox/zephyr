@@ -54,8 +54,11 @@
 #include "common/log.h"
 #include "hal/debug.h"
 
-static void ticker_op_stop_scan_cb(uint32_t status, void *params);
-static void ticker_op_cb(uint32_t status, void *params);
+static void ticker_op_stop_scan_cb(uint32_t status, void *param);
+#if defined(CONFIG_BT_CTLR_ADV_EXT) && defined(CONFIG_BT_CTLR_PHY_CODED)
+static void ticker_op_stop_scan_other_cb(uint32_t status, void *param);
+#endif /* CONFIG_BT_CTLR_ADV_EXT && CONFIG_BT_CTLR_PHY_CODED */
+static void ticker_op_cb(uint32_t status, void *param);
 static inline void conn_release(struct ll_scan_set *scan);
 
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
@@ -77,6 +80,8 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	uint32_t ready_delay_us;
 	struct lll_scan *lll;
 	struct ll_conn *conn;
+	uint16_t max_tx_time;
+	uint16_t max_rx_time;
 	memq_link_t *link;
 	uint8_t hop;
 	int err;
@@ -134,6 +139,9 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 #endif /* !CONFIG_BT_CTLR_ADV_EXT */
 
 	if (lll->conn) {
+		conn_lll = lll->conn;
+		conn = HDR_LLL2ULL(conn_lll);
+
 		goto conn_is_valid;
 	}
 
@@ -148,12 +156,6 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 
 		return BT_HCI_ERR_MEM_CAPACITY_EXCEEDED;
 	}
-
-	ull_scan_params_set(lll, 0, scan_interval, scan_window, filter_policy);
-
-	lll->adv_addr_type = peer_addr_type;
-	memcpy(lll->adv_addr, peer_addr, BDADDR_SIZE);
-	lll->conn_timeout = timeout;
 
 	conn_lll = &conn->lll;
 
@@ -186,12 +188,18 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	conn_lll->max_rx_octets = PDU_DC_PAYLOAD_SIZE_MIN;
 
 #if defined(CONFIG_BT_CTLR_PHY)
+	/* Use the default 1M packet Tx time, extended connection initiation
+	 * in LLL will update this with the correct PHY.
+	 */
 	conn_lll->max_tx_time = PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, PHY_1M);
 	conn_lll->max_rx_time = PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, PHY_1M);
 #endif /* CONFIG_BT_CTLR_PHY */
 #endif /* CONFIG_BT_CTLR_DATA_LENGTH */
 
 #if defined(CONFIG_BT_CTLR_PHY)
+	/* Use the default 1M PHY, extended connection initiation in LLL will
+	 * update this with the correct PHY.
+	 */
 	conn_lll->phy_tx = PHY_1M;
 	conn_lll->phy_flags = 0;
 	conn_lll->phy_tx_time = PHY_1M;
@@ -260,10 +268,11 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	conn->llcp_rx = NULL;
 	conn->llcp_cu.req = conn->llcp_cu.ack = 0;
 	conn->llcp_feature.req = conn->llcp_feature.ack = 0;
-	conn->llcp_feature.features_conn = LL_FEAT;
+	conn->llcp_feature.features_conn = ll_feat_get();
 	conn->llcp_feature.features_peer = 0;
 	conn->llcp_version.req = conn->llcp_version.ack = 0;
 	conn->llcp_version.tx = conn->llcp_version.rx = 0U;
+	conn->llcp_terminate.req = conn->llcp_terminate.ack = 0U;
 	conn->llcp_terminate.reason_final = 0U;
 	/* NOTE: use allocated link for generating dedicated
 	 * terminate ind rx node
@@ -305,23 +314,12 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	conn->tx_head = conn->tx_ctrl = conn->tx_ctrl_last =
 	conn->tx_data = conn->tx_data_last = 0;
 
-#if defined(CONFIG_BT_CTLR_PHY)
-	ready_delay_us = lll_radio_tx_ready_delay_get(conn_lll->phy_tx,
-						      conn_lll->phy_flags);
-#else
-	ready_delay_us = lll_radio_tx_ready_delay_get(0, 0);
-#endif
-
 	/* TODO: active_to_start feature port */
 	conn->ull.ticks_active_to_start = 0U;
 	conn->ull.ticks_prepare_to_start =
 		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_XTAL_US);
 	conn->ull.ticks_preempt_to_start =
 		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_PREEMPT_MIN_US);
-	conn->ull.ticks_slot =
-		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_START_US +
-				       ready_delay_us +
-				       328 + EVENT_IFS_US + 328);
 
 	lll->conn = conn_lll;
 
@@ -329,6 +327,47 @@ uint8_t ll_create_connection(uint16_t scan_interval, uint16_t scan_window,
 	lll_hdr_init(&conn->lll, conn);
 
 conn_is_valid:
+#if defined(CONFIG_BT_CTLR_PHY)
+	ready_delay_us = lll_radio_tx_ready_delay_get(conn_lll->phy_tx,
+						      conn_lll->phy_flags);
+#else
+	ready_delay_us = lll_radio_tx_ready_delay_get(0, 0);
+#endif
+
+#if defined(CONFIG_BT_CTLR_DATA_LENGTH)
+#if defined(CONFIG_BT_CTLR_PHY)
+#if defined(CONFIG_BT_CTLR_ADV_EXT)
+	conn_lll->max_tx_time = MAX(conn_lll->max_tx_time,
+				    PKT_US(PDU_DC_PAYLOAD_SIZE_MIN,
+					   lll->phy));
+	conn_lll->max_rx_time = MAX(conn_lll->max_rx_time,
+				    PKT_US(PDU_DC_PAYLOAD_SIZE_MIN,
+					   lll->phy));
+#endif /* CONFIG_BT_CTLR_ADV_EXT */
+	max_tx_time = conn_lll->max_tx_time;
+	max_rx_time = conn_lll->max_rx_time;
+#else /* !CONFIG_BT_CTLR_PHY */
+	max_tx_time = PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, PHY_1M);
+	max_rx_time = PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, PHY_1M);
+#endif /* !CONFIG_BT_CTLR_PHY */
+#else /* !CONFIG_BT_CTLR_DATA_LENGTH */
+	max_tx_time = PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, PHY_1M);
+	max_rx_time = PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, PHY_1M);
+#if defined(CONFIG_BT_CTLR_ADV_EXT)
+	max_tx_time = MAX(max_tx_time,
+			  PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, lll->phy));
+	max_rx_time = MAX(max_rx_time,
+			  PKT_US(PDU_DC_PAYLOAD_SIZE_MIN, lll->phy));
+#endif /* CONFIG_BT_CTLR_ADV_EXT */
+#endif /* !CONFIG_BT_CTLR_DATA_LENGTH */
+
+	conn->ull.ticks_slot =
+		HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_START_US +
+				       ready_delay_us +
+				       max_tx_time +
+				       EVENT_IFS_US +
+				       max_rx_time);
+
 #if defined(CONFIG_BT_CTLR_PRIVACY)
 	ull_filter_scan_update(filter_policy);
 
@@ -351,6 +390,11 @@ conn_is_valid:
 #endif
 
 	scan->own_addr_type = own_addr_type;
+	lll->adv_addr_type = peer_addr_type;
+	memcpy(lll->adv_addr, peer_addr, BDADDR_SIZE);
+	lll->conn_timeout = timeout;
+
+	ull_scan_params_set(lll, 0, scan_interval, scan_window, filter_policy);
 
 #if defined(CONFIG_BT_CTLR_ADV_EXT)
 	return 0;
@@ -662,35 +706,36 @@ void ull_master_cleanup(struct node_rx_hdr *rx_free)
 #endif /* CONFIG_BT_CTLR_ADV_EXT && CONFIG_BT_CTLR_PHY_CODED */
 }
 
-void ull_master_setup(memq_link_t *link, struct node_rx_hdr *rx,
-		      struct node_rx_ftr *ftr, struct lll_conn *lll)
+void ull_master_setup(struct node_rx_hdr *rx, struct node_rx_ftr *ftr,
+		      struct lll_conn *lll)
 {
 	uint32_t conn_offset_us, conn_interval_us;
 	uint8_t ticker_id_scan, ticker_id_conn;
 	uint8_t peer_addr[BDADDR_SIZE];
 	uint32_t ticks_slot_overhead;
-	struct ll_scan_set *scan;
 	uint32_t ticks_slot_offset;
+	struct ll_scan_set *scan;
 	struct pdu_adv *pdu_tx;
-	struct node_rx_cc *cc;
-	struct ll_conn *conn;
 	uint8_t peer_addr_type;
 	uint32_t ticker_status;
+	struct node_rx_cc *cc;
+	struct ll_conn *conn;
+	memq_link_t *link;
 	uint8_t chan_sel;
 
-	((struct lll_scan *)ftr->param)->conn = NULL;
-
-	scan = ((struct lll_scan *)ftr->param)->hdr.parent;
-	conn = lll->hdr.parent;
-
+	/* Get reference to Tx-ed CONNECT_IND PDU */
 	pdu_tx = (void *)((struct node_rx_pdu *)rx)->pdu;
 
+	/* Backup peer addr and type, as we reuse the Tx-ed PDU to generate
+	 * event towards LL
+	 */
 	peer_addr_type = pdu_tx->rx_addr;
 	memcpy(peer_addr, &pdu_tx->connect_ind.adv_addr[0], BDADDR_SIZE);
 
 	/* This is the chan sel bit from the received adv pdu */
 	chan_sel = pdu_tx->chan_sel;
 
+	/* Populate the fields required for connection complete event */
 	cc = (void *)pdu_tx;
 	cc->status = 0U;
 	cc->role = 0U;
@@ -723,17 +768,25 @@ void ull_master_setup(memq_link_t *link, struct node_rx_hdr *rx,
 		memcpy(cc->peer_addr, &peer_addr[0], BDADDR_SIZE);
 	}
 
+	scan = HDR_LLL2ULL(ftr->param);
+
 	cc->interval = lll->interval;
 	cc->latency = lll->latency;
 	cc->timeout = scan->lll.conn_timeout;
 	cc->sca = lll_clock_sca_local_get();
 
+	conn = lll->hdr.parent;
 	lll->handle = ll_conn_handle_get(conn);
 	rx->handle = lll->handle;
 
 #if defined(CONFIG_BT_CTLR_TX_PWR_DYNAMIC_CONTROL)
 	lll->tx_pwr_lvl = RADIO_TXP_DEFAULT;
 #endif /* CONFIG_BT_CTLR_TX_PWR_DYNAMIC_CONTROL */
+
+	/* Use the link stored in the node rx to enqueue connection
+	 * complete node rx towards LL context.
+	 */
+	link = rx->link;
 
 	/* Use Channel Selection Algorithm #2 if peer too supports it */
 	if (IS_ENABLED(CONFIG_BT_CTLR_CHAN_SEL_2)) {
@@ -772,17 +825,16 @@ void ull_master_setup(memq_link_t *link, struct node_rx_hdr *rx,
 
 	ticks_slot_offset = MAX(conn->ull.ticks_active_to_start,
 				conn->ull.ticks_prepare_to_start);
-
 	if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT)) {
 		ticks_slot_overhead = ticks_slot_offset;
 	} else {
 		ticks_slot_overhead = 0U;
 	}
+	ticks_slot_offset += HAL_TICKER_US_TO_TICKS(EVENT_OVERHEAD_START_US);
 
 	conn_interval_us = lll->interval * CONN_INT_UNIT_US;
 	conn_offset_us = ftr->radio_end_us;
 	conn_offset_us += EVENT_TICKER_RES_MARGIN_US;
-	conn_offset_us -= EVENT_OVERHEAD_START_US;
 
 #if defined(CONFIG_BT_CTLR_PHY)
 	conn_offset_us -= lll_radio_tx_ready_delay_get(lll->phy_tx,
@@ -804,8 +856,34 @@ void ull_master_setup(memq_link_t *link, struct node_rx_hdr *rx,
 	ticker_status = ticker_stop(TICKER_INSTANCE_ID_CTLR,
 				    TICKER_USER_ID_ULL_HIGH,
 				    ticker_id_scan, ticker_op_stop_scan_cb,
-				    (void *)(uint32_t)ticker_id_scan);
-	ticker_op_stop_scan_cb(ticker_status, (void *)(uint32_t)ticker_id_scan);
+				    scan);
+	LL_ASSERT((ticker_status == TICKER_STATUS_SUCCESS) ||
+		  (ticker_status == TICKER_STATUS_BUSY));
+
+#if defined(CONFIG_BT_CTLR_ADV_EXT) && defined(CONFIG_BT_CTLR_PHY_CODED)
+	/* Determine if coded PHY was also enabled, if so, reset the assigned
+	 * connection context.
+	 */
+	struct ll_scan_set *scan_other =
+				ull_scan_is_enabled_get(SCAN_HANDLE_PHY_CODED);
+	if (scan_other) {
+		if (scan_other == scan) {
+			scan_other = ull_scan_is_enabled_get(SCAN_HANDLE_1M);
+		}
+
+		if (scan_other) {
+			ticker_id_scan = TICKER_ID_SCAN_BASE +
+					 ull_scan_handle_get(scan_other);
+			ticker_status = ticker_stop(TICKER_INSTANCE_ID_CTLR,
+						    TICKER_USER_ID_ULL_HIGH,
+						    ticker_id_scan,
+						    ticker_op_stop_scan_other_cb,
+						    scan_other);
+			LL_ASSERT((ticker_status == TICKER_STATUS_SUCCESS) ||
+				  (ticker_status == TICKER_STATUS_BUSY));
+		}
+	}
+#endif /* CONFIG_BT_CTLR_ADV_EXT && CONFIG_BT_CTLR_PHY_CODED */
 
 	/* Scanner stop can expire while here in this ISR.
 	 * Deferred attempt to stop can fail as it would have
@@ -839,8 +917,8 @@ void ull_master_setup(memq_link_t *link, struct node_rx_hdr *rx,
 #endif
 }
 
-void ull_master_ticker_cb(uint32_t ticks_at_expire, uint32_t remainder, uint16_t lazy,
-			  uint8_t force, void *param)
+void ull_master_ticker_cb(uint32_t ticks_at_expire, uint32_t remainder,
+			  uint16_t lazy, uint8_t force, void *param)
 {
 	static memq_link_t link;
 	static struct mayfly mfy = {0, 0, &link, NULL, lll_master_prepare};
@@ -873,6 +951,17 @@ void ull_master_ticker_cb(uint32_t ticks_at_expire, uint32_t remainder, uint16_t
 		/* Handle any LL Control Procedures */
 		ret = ull_conn_llcp(conn, ticks_at_expire, lazy);
 		if (ret) {
+			/* NOTE: Under BT_CTLR_LOW_LAT, ULL_LOW context is
+			 *       disabled inside radio events, hence, abort any
+			 *       active radio event which will re-enable
+			 *       ULL_LOW context that permits ticker job to run.
+			 */
+			if (IS_ENABLED(CONFIG_BT_CTLR_LOW_LAT) &&
+			    (CONFIG_BT_CTLR_LLL_PRIO ==
+			     CONFIG_BT_CTLR_ULL_LOW_PRIO)) {
+				ll_radio_state_abort();
+			}
+
 			DEBUG_RADIO_CLOSE_M(0);
 			return;
 		}
@@ -910,14 +999,50 @@ void ull_master_ticker_cb(uint32_t ticks_at_expire, uint32_t remainder, uint16_t
 	DEBUG_RADIO_PREPARE_M(1);
 }
 
-static void ticker_op_stop_scan_cb(uint32_t status, void *params)
+static void ticker_op_stop_scan_cb(uint32_t status, void *param)
 {
-	/* TODO: */
+	/* NOTE: Nothing to do here, present here to add debug code if required
+	 */
 }
 
-static void ticker_op_cb(uint32_t status, void *params)
+#if defined(CONFIG_BT_CTLR_ADV_EXT) && defined(CONFIG_BT_CTLR_PHY_CODED)
+static void ticker_op_stop_scan_other_cb(uint32_t status, void *param)
 {
-	ARG_UNUSED(params);
+	static memq_link_t link;
+	static struct mayfly mfy = {0, 0, &link, NULL, NULL};
+	struct ll_scan_set *scan;
+	struct ull_hdr *hdr;
+
+	/* Ignore if race between thread and ULL */
+	if (status != TICKER_STATUS_SUCCESS) {
+		/* TODO: detect race */
+
+		return;
+	}
+
+	/* NOTE: We are in ULL_LOW which can be pre-empted by ULL_HIGH.
+	 *       As we are in the callback after successful stop of the
+	 *       ticker, the ULL reference count will not be modified
+	 *       further hence it is safe to check and act on either the need
+	 *       to call lll_disable or not.
+	 */
+	scan = param;
+	hdr = &scan->ull;
+	mfy.param = &scan->lll;
+	if (ull_ref_get(hdr)) {
+		uint32_t ret;
+
+		mfy.fp = lll_disable;
+		ret = mayfly_enqueue(TICKER_USER_ID_ULL_LOW,
+				     TICKER_USER_ID_LLL, 0, &mfy);
+		LL_ASSERT(!ret);
+	}
+}
+#endif /* CONFIG_BT_CTLR_ADV_EXT && CONFIG_BT_CTLR_PHY_CODED */
+
+static void ticker_op_cb(uint32_t status, void *param)
+{
+	ARG_UNUSED(param);
 
 	LL_ASSERT(status == TICKER_STATUS_SUCCESS);
 }

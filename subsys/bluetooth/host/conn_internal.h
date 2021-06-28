@@ -187,7 +187,7 @@ struct bt_conn {
 	 * - Initiator connect create cancel.
 	 * - Connection cleanup.
 	 */
-	struct k_delayed_work	deferred_work;
+	struct k_work_delayable	deferred_work;
 
 	union {
 		struct bt_conn_le	le;
@@ -320,6 +320,8 @@ struct bt_conn *bt_conn_lookup_state_le(uint8_t id, const bt_addr_le_t *peer,
 
 /* Set connection object in certain state and perform action related to state */
 void bt_conn_set_state(struct bt_conn *conn, bt_conn_state_t state);
+
+void bt_conn_connected(struct bt_conn *conn);
 
 int bt_conn_le_conn_update(struct bt_conn *conn,
 			   const struct bt_le_conn_param *param);

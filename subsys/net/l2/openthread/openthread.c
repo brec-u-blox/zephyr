@@ -32,6 +32,7 @@ LOG_MODULE_REGISTER(net_l2_openthread, CONFIG_OPENTHREAD_L2_LOG_LEVEL);
 #include <openthread/joiner.h>
 #include <openthread-system.h>
 #include <openthread-config-generic.h>
+#include <utils/uart.h>
 
 #include <platform-zephyr.h>
 
@@ -130,6 +131,18 @@ static void ipv6_addr_event_handler(struct net_mgmt_event_callback *cb,
 	}
 }
 #endif
+
+static int ncp_hdlc_send(const uint8_t *buf, uint16_t len)
+{
+	otError err;
+
+	err = otPlatUartSend(buf, len);
+	if (err != OT_ERROR_NONE) {
+		return 0;
+	}
+
+	return len;
+}
 
 void otPlatRadioGetIeeeEui64(otInstance *instance, uint8_t *ieee_eui64)
 {
@@ -442,6 +455,8 @@ static int openthread_init(struct net_if *iface)
 
 	ll_addr = net_if_get_link_addr(iface);
 
+	openthread_api_mutex_lock(ot_context);
+
 	otSysInit(0, NULL);
 
 	ot_context->instance = otInstanceInitSingle();
@@ -454,7 +469,8 @@ static int openthread_init(struct net_if *iface)
 	}
 
 	if (IS_ENABLED(CONFIG_OPENTHREAD_COPROCESSOR)) {
-		otNcpInit(ot_context->instance);
+		otPlatUartEnable();
+		otNcpHdlcInit(ot_context->instance, ncp_hdlc_send);
 	} else {
 		otIp6SetReceiveFilterEnabled(ot_context->instance, true);
 		otIp6SetReceiveCallback(ot_context->instance,
@@ -468,6 +484,8 @@ static int openthread_init(struct net_if *iface)
 			NET_EVENT_IPV6_ADDR_ADD | NET_EVENT_IPV6_MADDR_ADD);
 		net_mgmt_add_event_callback(&ip6_addr_cb);
 	}
+
+	openthread_api_mutex_unlock(ot_context);
 
 	ot_tid = k_thread_create(&ot_thread_data, ot_stack_area,
 				 K_KERNEL_STACK_SIZEOF(ot_stack_area),
